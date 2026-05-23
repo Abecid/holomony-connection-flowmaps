@@ -432,6 +432,63 @@ The high-level initial signal is: on the noncommuting nonlinear connection, `hol
 
 ## 9. A800 / CUDA runs
 
+### Modal runs
+
+The repo includes a Modal launcher that mirrors the CUDA/A800 scripts while
+persisting outputs and downloaded data in Modal Volumes:
+
+```bash
+python -m pip install modal
+modal setup
+```
+
+For W&B logging, create a Modal Secret named `wandb-adamlee00` with
+`WANDB_API_KEY` in the `hao-ai-lab` workspace. The launcher creates these
+Volumes lazily if needed: `holonomy-flowmaps-runs`,
+`holonomy-flowmaps-data`, and `holonomy-flowmaps-cache`.
+
+```bash
+MODAL_PROFILE=hao-ai-lab modal secret create wandb-adamlee00 WANDB_API_KEY=...
+```
+
+Synthetic nonlinear benchmark, single seed:
+
+```bash
+MODAL_PROFILE=hao-ai-lab modal run modal_train.py \
+  --mode synthetic \
+  --seeds 0
+```
+
+Synthetic multi-seed paper table:
+
+```bash
+MODAL_PROFILE=hao-ai-lab modal run modal_train.py \
+  --mode synthetic \
+  --seeds "0 1 2" \
+  --steps 10000 \
+  --batch 4096
+```
+
+Commuting negative control:
+
+```bash
+MODAL_PROFILE=hao-ai-lab modal run modal_train.py \
+  --mode commute \
+  --seeds 0
+```
+
+Affine-MNIST visual benchmark:
+
+```bash
+MODAL_PROFILE=hao-ai-lab modal run modal_train.py \
+  --mode affine_mnist \
+  --seeds 0
+```
+
+The Modal launcher requests `H100:2` because the README scripts schedule
+independent runs across two GPUs. Outputs land under `/runs/...` inside the
+`holonomy-flowmaps-runs` Volume.
+
 ### Synthetic benchmark on two A800s
 
 This launches the five synthetic baselines across two GPUs using CUDA + BF16 autocast:
