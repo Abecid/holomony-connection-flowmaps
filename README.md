@@ -485,16 +485,19 @@ MODAL_PROFILE=hao-ai-lab modal run modal_train.py \
   --seeds 0
 ```
 
-The Modal launcher requests `H100:2` because the README scripts schedule
-independent runs across two GPUs. Outputs land under `/runs/...` inside the
-`holonomy-flowmaps-runs` Volume.
+The Modal launcher requests `A100:2` by default. Override the count at launch
+time, for example `MODAL_GPU_COUNT=4 MODAL_PROFILE=hao-ai-lab modal run
+modal_train.py --mode synthetic --seeds 0`. Outputs land under `/runs/...`
+inside the `holonomy-flowmaps-runs` Volume.
 
-### Synthetic benchmark on two A800s
+### Synthetic benchmark on A800/A100 GPUs
 
-This launches the five synthetic baselines across two GPUs using CUDA + BF16 autocast:
+This launches the five synthetic runs across the visible GPUs using CUDA + BF16
+autocast. Set `NUM_GPUS` when running outside Modal if auto-detection is not
+available.
 
 ```bash
-STEPS=10000 BATCH=4096 HIDDEN=256 DEPTH=5 bash scripts/run_a800_synthetic_two_gpu.sh
+NUM_GPUS=4 STEPS=10000 BATCH=4096 HIDDEN=256 DEPTH=5 bash scripts/run_a800_synthetic_two_gpu.sh
 ```
 
 Multi-seed run for paper tables:

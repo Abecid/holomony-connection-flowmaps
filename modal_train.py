@@ -12,6 +12,8 @@ Example:
 
 from __future__ import annotations
 
+import os
+
 import modal
 
 APP_NAME = "holonomy-connection-flowmaps-train"
@@ -28,8 +30,23 @@ WANDB_SECRET_NAME = "wandb-adamlee00"
 WANDB_ENTITY = "adamlee00"
 WANDB_PROJECT = "holonomy-connection-flowmaps"
 
-# The README scripts schedule independent model runs across two GPUs.
-GPU = "A100:2"
+
+def _positive_int_env(name: str, default: int) -> int:
+    value = os.environ.get(name, str(default))
+    try:
+        out = int(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a positive integer, got {value!r}") from exc
+    if out < 1:
+        raise ValueError(f"{name} must be a positive integer, got {value!r}")
+    return out
+
+
+# Modal evaluates this when the app is loaded. Use e.g.
+# MODAL_GPU_COUNT=4 modal run modal_train.py --mode synthetic --seeds 0
+MODAL_GPU_TYPE = os.environ.get("MODAL_GPU_TYPE", "A100")
+MODAL_GPU_COUNT = _positive_int_env("MODAL_GPU_COUNT", 2)
+GPU = MODAL_GPU_TYPE if MODAL_GPU_COUNT == 1 else f"{MODAL_GPU_TYPE}:{MODAL_GPU_COUNT}"
 
 runs_vol = modal.Volume.from_name(RUNS_VOLUME_NAME, create_if_missing=True)
 data_vol = modal.Volume.from_name(DATA_VOLUME_NAME, create_if_missing=True)
@@ -140,7 +157,7 @@ def train(
         data_vol.commit()
         cache_vol.commit()
 
-    def preflight() -> None:
+    def preflight() -> int:
         import torch
         import torchvision
 
@@ -149,11 +166,13 @@ def train(
         print(f"torchvision={torchvision.__version__}", flush=True)
         if not torch.cuda.is_available():
             raise RuntimeError("CUDA is not available in the Modal container.")
-        print(f"cuda_devices={torch.cuda.device_count()}", flush=True)
-        for idx in range(torch.cuda.device_count()):
+        cuda_devices = torch.cuda.device_count()
+        print(f"cuda_devices={cuda_devices}", flush=True)
+        for idx in range(cuda_devices):
             print(f"cuda:{idx} {torch.cuda.get_device_name(idx)}", flush=True)
         subprocess.run(["python", "-m", "pytest", "tests/test_integrators.py", "tests/test_models.py", "-q"], cwd=PROJECT_DIR, check=True)
         print("=== Modal preflight OK ===", flush=True)
+        return cuda_devices
 
     def base_env(seed: int, out: str) -> dict[str, str]:
         return {
@@ -171,6 +190,7 @@ def train(
             "WANDB_GROUP": Path(out).name,
             "WANDB_MODE": wandb_mode,
             "WANDB_ARTIFACTS": "1" if wandb_artifacts else "0",
+            "NUM_GPUS": str(cuda_devices),
         }
 
     def combine_synthetic(seed_dirs: list[Path], out: Path) -> None:
@@ -194,7 +214,7 @@ def train(
     mode = mode.strip().lower().replace("-", "_")
     seed_values = _parse_seeds(seeds)
 
-    preflight()
+    cuda_devices = preflight()
 
     if mode == "synthetic":
         seed_dirs: list[Path] = []
