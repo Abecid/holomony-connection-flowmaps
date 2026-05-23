@@ -25,17 +25,9 @@ This is the direct experimental foil to path-independent multi-parameter flow me
 
 ## 1. Setup
 
-### Conda CPU / debug setup
+### Conda env
 
-```bash
-conda env create -f environment.yml
-conda activate holonomy-connection-flowmaps
-pip install -e .
-```
-
-### CUDA / A800 setup 
-
-For the 2x A800 box, use the CUDA environment:
+Use the CUDA environment:
 
 ```bash
 conda env create -f environment-cuda.yml
