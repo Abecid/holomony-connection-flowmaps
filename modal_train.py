@@ -137,6 +137,9 @@ def train(
     test_every: int,
     eval_batch: int,
     eval_batches: int,
+    model_steps: int,
+    gt_steps: int,
+    eval_gt_steps: int,
     workers: int,
     wandb: bool,
     wandb_mode: str,
@@ -183,6 +186,9 @@ def train(
             "HIDDEN": str(hidden),
             "DEPTH": str(depth),
             "TEST_EVERY": str(test_every),
+            "MODEL_STEPS": str(model_steps),
+            "GT_STEPS": str(gt_steps),
+            "EVAL_GT_STEPS": str(eval_gt_steps),
             "EVAL_BATCH": str(eval_batch),
             "EVAL_BATCHES": str(eval_batches),
             "WANDB": "1" if wandb else "0",
@@ -283,6 +289,9 @@ def main(
     test_every: int = 500,
     eval_batch: int = 0,
     eval_batches: int = 2,
+    model_steps: int = 0,
+    gt_steps: int = 0,
+    eval_gt_steps: int = 0,
     workers: int = 8,
     wandb: bool = True,
     wandb_mode: str = "online",
@@ -298,12 +307,18 @@ def main(
         hidden = hidden or 96
         depth = depth or 6
         eval_batch = eval_batch or batch
+        model_steps = model_steps or 4
+        gt_steps = gt_steps or 16
+        eval_gt_steps = eval_gt_steps or 32
     else:
         steps = steps or 10000
         batch = batch or 4096
         hidden = hidden or 256
         depth = depth or 5
         eval_batch = eval_batch or 4096
+        model_steps = model_steps or 8
+        gt_steps = gt_steps or 32
+        eval_gt_steps = eval_gt_steps or 48
 
     out = train.remote(
         normalized_mode,
@@ -316,6 +331,9 @@ def main(
         test_every,
         eval_batch,
         eval_batches,
+        model_steps,
+        gt_steps,
+        eval_gt_steps,
         workers,
         wandb,
         wandb_mode,

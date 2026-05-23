@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import time
 from typing import Any
 
 import torch
@@ -59,6 +60,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--cycle-weight", type=float, default=None)
     p.add_argument("--flat-weight", type=float, default=None)
     p.add_argument("--save-best-checkpoints", action=argparse.BooleanOptionalAction, default=True, help="Save best_* checkpoints for key held-out paper metrics.")
+    p.add_argument("--log-timing", action=argparse.BooleanOptionalAction, default=True, help="Log coarse train/eval timing diagnostics.")
     add_wandb_args(p)
     args = p.parse_args()
     if args.test_every is not None:
@@ -126,7 +128,10 @@ def main() -> None:
     metrics_path = outdir / "metrics.csv"
     pbar = trange(1, args.steps + 1, desc=f"{args.model}/{args.world}", mininterval=1.0)
     last_row: dict[str, float] = {}
+    last_timing_step = 0
+    last_timing_time = time.perf_counter()
     for step in pbar:
+        step_start = time.perf_counter()
         model.train()
         loss_terms: dict[str, torch.Tensor] = {}
 
@@ -180,11 +185,20 @@ def main() -> None:
             last_row["loss"] = float(loss.detach().cpu())
             last_row["grad_norm"] = float(grad_norm.detach().cpu() if hasattr(grad_norm, "detach") else grad_norm)
             last_row["lr"] = float(opt.param_groups[0]["lr"])
+            if args.log_timing:
+                now = time.perf_counter()
+                interval_steps = step - last_timing_step
+                if interval_steps > 0:
+                    last_row["sec_per_step"] = (now - last_timing_time) / interval_steps
+                last_row["last_step_sec"] = now - step_start
+                last_timing_step = step
+                last_timing_time = now
             pbar.set_postfix(loss=f"{last_row['loss']:.3e}", loc=f"{last_row.get('local_loss', 0):.2e}", hol=f"{last_row.get('holonomy_loss', 0):.2e}")
             if wandb_run is not None:
                 wandb_run.log({"train/step": step, **{f"train/{k}": v for k, v in last_row.items()}}, step=step)
 
         if step == args.steps or (args.eval_every and step % args.eval_every == 0):
+            eval_start = time.perf_counter()
             evals = evaluate_model(
                 model,
                 cfg,
@@ -196,6 +210,8 @@ def main() -> None:
                 n_steps_model=args.model_steps,
                 n_steps_gt=args.eval_gt_steps,
             )
+            if args.log_timing:
+                evals["eval_sec"] = time.perf_counter() - eval_start
             paper_metrics = paper_metric_aliases(evals)
             best_source = dict(paper_metrics)
             # Identity residual is a negative-control metric: lower is good only in the

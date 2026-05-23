@@ -18,6 +18,9 @@ OUT_ROOT=${OUT_ROOT:-}
 AMP=${AMP:---amp}
 COMPILE=${COMPILE:-}
 TEST_EVERY=${TEST_EVERY:-500}
+MODEL_STEPS=${MODEL_STEPS:-8}
+GT_STEPS=${GT_STEPS:-32}
+EVAL_GT_STEPS=${EVAL_GT_STEPS:-48}
 EVAL_BATCH=${EVAL_BATCH:-4096}
 EVAL_BATCHES=${EVAL_BATCHES:-2}
 WANDB=${WANDB:-0}
@@ -85,7 +88,7 @@ done
 
 TRAIN_FAILURES_FILE="$PWD/.run_synthetic_train_failures_$$"
 : > "$TRAIN_FAILURES_FILE"
-export WORLD STEPS BATCH HIDDEN DEPTH TEST_EVERY EVAL_BATCH EVAL_BATCHES
+export WORLD STEPS BATCH HIDDEN DEPTH TEST_EVERY MODEL_STEPS GT_STEPS EVAL_GT_STEPS EVAL_BATCH EVAL_BATCHES
 export WANDB WANDB_PROJECT WANDB_GROUP WANDB_MODE WANDB_ARTIFACTS
 export AMP COMPILE SEEDS OUT OUT_ROOT NUM_GPUS MAX_PARALLEL_JOBS TRAIN_FAILURES_FILE
 export GPU_IDS_STR="${GPU_IDS[*]}"
@@ -127,9 +130,9 @@ def command(model: str, seed: str, out: Path) -> list[str]:
         "--flat-batch-size", "512",
         "--hidden", os.environ["HIDDEN"],
         "--depth", os.environ["DEPTH"],
-        "--model-steps", "8",
-        "--gt-steps", "32",
-        "--eval-gt-steps", "48",
+        "--model-steps", os.environ["MODEL_STEPS"],
+        "--gt-steps", os.environ["GT_STEPS"],
+        "--eval-gt-steps", os.environ["EVAL_GT_STEPS"],
         "--eval-every", os.environ["TEST_EVERY"],
         "--eval-batch-size", os.environ["EVAL_BATCH"],
         "--eval-batches", os.environ["EVAL_BATCHES"],
@@ -204,7 +207,7 @@ for S in "${SEED_VALUES[@]}"; do
       --checkpoint "$SEED_OUT/$M/checkpoint.pt" \
       --batch-size 16384 \
       --batches 4 \
-      --gt-steps 64 \
+      --gt-steps "$EVAL_GT_STEPS" \
       --scaling \
       --device cuda || STATUS=$?
     if (( STATUS != 0 )); then
