@@ -221,7 +221,7 @@ def train(
         for seed in seed_values:
             out = f"{RUNS_MOUNT}/synthetic_{world}_{run_id}_seed{seed}"
             env = {**base_env(seed, out), "WORLD": world}
-            run(["bash", "scripts/run_a800_synthetic_two_gpu.sh"], env=env)
+            run(["bash", "scripts/run_synthetic.sh"], env=env)
             seed_dirs.append(Path(out))
             commit_volumes()
         if len(seed_dirs) > 1:
@@ -237,7 +237,7 @@ def train(
         for seed in seed_values:
             out = f"{RUNS_MOUNT}/synthetic_commute_{run_id}_seed{seed}"
             env = {**base_env(seed, out), "WORLD": "commute"}
-            run(["bash", "scripts/run_a800_synthetic_two_gpu.sh"], env=env)
+            run(["bash", "scripts/run_synthetic.sh"], env=env)
             seed_dirs.append(Path(out))
             commit_volumes()
         if len(seed_dirs) > 1:

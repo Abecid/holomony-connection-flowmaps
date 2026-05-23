@@ -40,75 +40,35 @@ print(torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_
 PY
 ```
 
-The training code is PyTorch-native and supports CUDA, TF32, and AMP/BF16:
+## 1.1 Main Training Command
+
+For the main synthetic experiment, run this:
 
 ```bash
-python -m holoflow_conn.train_connection --device cuda --amp --amp-dtype bf16 --tf32 ...
+MODAL_GPU_COUNT=4 MODAL_PROFILE=hao-ai-lab modal run modal_train.py --mode synthetic --seeds "0 1 2"
 ```
 
-For the small synthetic MLP benchmark, the fastest use of two A800s is usually **parallel independent runs**, not `DataParallel`: each baseline/model runs on one GPU. For the image benchmark, batch sizes of 512--2048 are reasonable starting points.
+This runs the full synthetic comparison suite for seeds 0, 1, and 2. The
+launcher starts `holonomy_connection` first, then runs the baselines. It uses
+W&B by default through the Modal secret `wandb-adamlee00`.
 
-
-### Pip-only alternative
+Before the first Modal run, do the one-time setup:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-pip install -e .
+python -m pip install modal
+modal setup
+MODAL_PROFILE=hao-ai-lab modal secret create wandb-adamlee00 WANDB_API_KEY=...
 ```
 
-### Mac note
-
-On Apple Silicon, install PyTorch according to the official PyTorch selector, then run:
-
-```bash
-pip install -e .
-```
-
+Do not also run the bash script for this experiment. Modal runs that script
+inside the remote container once per seed.
 
 ---
 
-## 1.1 W&B logging and held-out paper metrics
+## 1.2 W&B logging and held-out paper metrics
 
-Both training entry points support optional Weights & Biases logging:
-
-```bash
-wandb login
-```
-
-Synthetic controlled-connection run:
-
-```bash
-python -m holoflow_conn.train_connection \
-  --model holonomy_connection \
-  --world nonlinear \
-  --steps 3000 \
-  --batch-size 256 \
-  --eval-every 500 \
-  --wandb \
-  --wandb-project holonomy-connection-flowmaps \
-  --wandb-group synthetic_nonlinear_seed0 \
-  --wandb-run-name holonomy_connection_nonlinear_seed0
-```
-
-Affine-MNIST run:
-
-```bash
-python -m holoflow_conn.affine_mnist \
-  --model holonomy_connection \
-  --data-dir data \
-  --steps 8000 \
-  --batch-size 1024 \
-  --eval-every 500 \
-  --amp --amp-dtype bf16 \
-  --wandb \
-  --wandb-project holonomy-connection-flowmaps \
-  --wandb-group affine_mnist_seed0 \
-  --wandb-run-name affine_holonomy_connection_seed0
-```
-
-The training loop now runs the held-out evaluation suite every `--eval-every` steps. `--test-every` is accepted as an alias. Default is 500 steps.
+The training loop runs held-out evaluation every `--eval-every` steps.
+`--test-every` is accepted as an alias. Default is 500 steps.
 
 The most paper-relevant metrics are logged under `paper/*`:
 
@@ -130,27 +90,8 @@ paper/ood_loop_holonomy_cosine
 paper/flatness_norm2
 ```
 
-Raw metrics are also logged under `test/*`, training losses under `train/*`, and best-so-far model-selection values under `best/*`. By default, training writes `best_comm_mse.pt`, `best_comm_cosine.pt`, `best_loop_holonomy_mse.pt`, and `best_ood_loop_holonomy_mse.pt` when those criteria improve. For `world=commute`, it also tracks `best_loop_pred_identity_mse.pt`, because low identity residual means the model is not hallucinating curvature. In noncommuting worlds, identity residual is logged as a diagnostic curve but is **not** used for model selection, because selecting for low identity residual would reward suppressing true holonomy. Use `--no-save-best-checkpoints` to disable best-checkpoint writes.
-
-For the two-GPU scripts, enable W&B with environment variables:
-
-```bash
-WANDB=1 WANDB_PROJECT=holonomy-connection-flowmaps TEST_EVERY=500 \
-  STEPS=10000 BATCH=4096 HIDDEN=256 DEPTH=5 \
-  bash scripts/run_a800_synthetic_two_gpu.sh
-```
-
-For offline logging on a cluster:
-
-```bash
-WANDB=1 WANDB_MODE=offline bash scripts/run_a800_synthetic_two_gpu.sh
-```
-
-Upload config/CSV/checkpoint artifacts by adding:
-
-```bash
-WANDB_ARTIFACTS=1
-```
+Raw metrics are also logged under `test/*`, training losses under `train/*`,
+and best-so-far model-selection values under `best/*`.
 
 ---
 
@@ -422,43 +363,14 @@ The high-level initial signal is: on the noncommuting nonlinear connection, `hol
 
 ---
 
-## 9. A800 / CUDA runs
+## 9. Optional Runs
 
-### Modal runs
-
-The repo includes a Modal launcher that mirrors the CUDA/A800 scripts while
-persisting outputs and downloaded data in Modal Volumes:
-
-```bash
-python -m pip install modal
-modal setup
-```
-
-For W&B logging, create a Modal Secret named `wandb-adamlee00` with
-`WANDB_API_KEY` in the `hao-ai-lab` workspace. The launcher creates these
-Volumes lazily if needed: `holonomy-flowmaps-runs`,
-`holonomy-flowmaps-data`, and `holonomy-flowmaps-cache`.
-
-```bash
-MODAL_PROFILE=hao-ai-lab modal secret create wandb-adamlee00 WANDB_API_KEY=...
-```
-
-Synthetic nonlinear benchmark, single seed:
+Single-seed smoke test:
 
 ```bash
 MODAL_PROFILE=hao-ai-lab modal run modal_train.py \
   --mode synthetic \
   --seeds 0
-```
-
-Synthetic multi-seed paper table:
-
-```bash
-MODAL_PROFILE=hao-ai-lab modal run modal_train.py \
-  --mode synthetic \
-  --seeds "0 1 2" \
-  --steps 10000 \
-  --batch 4096
 ```
 
 Commuting negative control:
@@ -477,32 +389,32 @@ MODAL_PROFILE=hao-ai-lab modal run modal_train.py \
   --seeds 0
 ```
 
-The Modal launcher requests `A100:2` by default. Override the count at launch
-time, for example `MODAL_GPU_COUNT=4 MODAL_PROFILE=hao-ai-lab modal run
-modal_train.py --mode synthetic --seeds 0`. Outputs land under `/runs/...`
-inside the `holonomy-flowmaps-runs` Volume.
+The main command at the top of the README requests 4 GPUs with
+`MODAL_GPU_COUNT=4`. If that variable is omitted, the Modal launcher requests
+`A100:2`. Outputs land under `/runs/...` inside the `holonomy-flowmaps-runs`
+Volume.
 
-### Synthetic benchmark on A800/A100 GPUs
+### Local CUDA Only
 
-This launches the five synthetic runs across the visible GPUs using CUDA + BF16
-autocast. Set `NUM_GPUS` when running outside Modal if auto-detection is not
-available.
+Do not run this if you are using Modal. This is the lower-level local/cluster
+script that Modal calls once per seed. It runs the same five synthetic models
+for one seed on the GPUs visible on the current machine.
 
 ```bash
-NUM_GPUS=4 STEPS=10000 BATCH=4096 HIDDEN=256 DEPTH=5 bash scripts/run_a800_synthetic_two_gpu.sh
+NUM_GPUS=4 STEPS=10000 BATCH=4096 HIDDEN=256 DEPTH=5 bash scripts/run_synthetic.sh
 ```
 
-Multi-seed run for paper tables:
+Local multi-seed version of the same CUDA script:
 
 ```bash
-SEEDS="0 1 2" STEPS=10000 BATCH=4096 bash scripts/run_a800_multiseed_synthetic.sh
+SEEDS="0 1 2" STEPS=10000 BATCH=4096 bash scripts/run_multiseed_synthetic.sh
 ```
 
 Outputs:
 
 ```text
-runs/a800_synthetic_nonlinear_seed0/comparison.csv
-runs/a800_synthetic_nonlinear_all_seeds.csv
+runs/synthetic_nonlinear_seed0/comparison.csv
+runs/synthetic_nonlinear_all_seeds.csv
 ```
 
 ### Torchvision affine-MNIST visual benchmark
