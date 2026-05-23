@@ -217,13 +217,16 @@ def train(
     cuda_devices = preflight()
 
     if mode == "synthetic":
-        seed_dirs: list[Path] = []
-        for seed in seed_values:
-            out = f"{RUNS_MOUNT}/synthetic_{world}_{run_id}_seed{seed}"
-            env = {**base_env(seed, out), "WORLD": world}
-            run(["bash", "scripts/run_synthetic.sh"], env=env)
-            seed_dirs.append(Path(out))
-            commit_volumes()
+        out_root = f"{RUNS_MOUNT}/synthetic_{world}_{run_id}"
+        seed_dirs = [Path(f"{out_root}_seed{seed}") for seed in seed_values]
+        env = {
+            **base_env(seed_values[0], f"{out_root}_seed{seed_values[0]}"),
+            "WORLD": world,
+            "SEEDS": " ".join(str(seed) for seed in seed_values),
+            "OUT_ROOT": out_root,
+        }
+        run(["bash", "scripts/run_synthetic.sh"], env=env)
+        commit_volumes()
         if len(seed_dirs) > 1:
             combine_synthetic(
                 seed_dirs,
@@ -233,13 +236,16 @@ def train(
         return str(seed_dirs[-1])
 
     if mode == "commute":
-        seed_dirs = []
-        for seed in seed_values:
-            out = f"{RUNS_MOUNT}/synthetic_commute_{run_id}_seed{seed}"
-            env = {**base_env(seed, out), "WORLD": "commute"}
-            run(["bash", "scripts/run_synthetic.sh"], env=env)
-            seed_dirs.append(Path(out))
-            commit_volumes()
+        out_root = f"{RUNS_MOUNT}/synthetic_commute_{run_id}"
+        seed_dirs = [Path(f"{out_root}_seed{seed}") for seed in seed_values]
+        env = {
+            **base_env(seed_values[0], f"{out_root}_seed{seed_values[0]}"),
+            "WORLD": "commute",
+            "SEEDS": " ".join(str(seed) for seed in seed_values),
+            "OUT_ROOT": out_root,
+        }
+        run(["bash", "scripts/run_synthetic.sh"], env=env)
+        commit_volumes()
         if len(seed_dirs) > 1:
             combine_synthetic(
                 seed_dirs,

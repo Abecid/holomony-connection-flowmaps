@@ -11,7 +11,10 @@ BATCH=${BATCH:-4096}
 HIDDEN=${HIDDEN:-256}
 DEPTH=${DEPTH:-5}
 SEED=${SEED:-0}
+SEEDS=${SEEDS:-$SEED}
+SEEDS=${SEEDS//,/ }
 OUT=${OUT:-runs/synthetic_${WORLD}_seed${SEED}}
+OUT_ROOT=${OUT_ROOT:-}
 AMP=${AMP:---amp}
 COMPILE=${COMPILE:-}
 TEST_EVERY=${TEST_EVERY:-500}
@@ -58,98 +61,178 @@ mkdir -p "$OUT"
 # Start the main method first so baseline crashes or hangs cannot block it from
 # launching. The remaining models are comparison baselines.
 MODELS=(holonomy_connection independent_cfm shared_cfm flat_pifm local_connection)
-PIDS=()
-PID_MODELS=()
-TRAIN_FAILURES=()
 EVAL_FAILURES=()
-COMPLETED_RUNS=()
+read -r -a SEED_VALUES <<< "$SEEDS"
+if (( ${#SEED_VALUES[@]} == 0 )); then
+  echo "SEEDS must contain at least one seed" >&2
+  exit 2
+fi
 
-wait_for_active_jobs() {
-  local IDX PID M STATUS
-  for IDX in "${!PIDS[@]}"; do
-    PID=${PIDS[$IDX]}
-    M=${PID_MODELS[$IDX]}
-    STATUS=0
-    wait "$PID" || STATUS=$?
-    if (( STATUS != 0 )); then
-      echo "=== $M failed with exit status $STATUS; see $OUT/$M.log ==="
-      TRAIN_FAILURES+=("$M:$STATUS")
-    fi
-  done
-  PIDS=()
-  PID_MODELS=()
+seed_out() {
+  local S=$1
+  if [ -n "$OUT_ROOT" ]; then
+    printf "%s_seed%s" "$OUT_ROOT" "$S"
+  elif (( ${#SEED_VALUES[@]} == 1 )); then
+    printf "%s" "$OUT"
+  else
+    printf "runs/synthetic_%s_seed%s" "$WORLD" "$S"
+  fi
 }
 
-for IDX in "${!MODELS[@]}"; do
-  M=${MODELS[$IDX]}
-  GPU=${GPU_IDS[$((IDX % NUM_GPUS))]}
-  echo "=== Launching $M on CUDA_VISIBLE_DEVICES=$GPU ($NUM_GPUS GPUs, max $MAX_PARALLEL_JOBS jobs) ==="
-  CUDA_VISIBLE_DEVICES=$GPU python -m holoflow_conn.train_connection \
-    --model "$M" \
-    --world "$WORLD" \
-    --steps "$STEPS" \
-    --batch-size "$BATCH" \
-    --flat-batch-size 512 \
-    --hidden "$HIDDEN" \
-    --depth "$DEPTH" \
-    --model-steps 8 \
-    --gt-steps 32 \
-    --eval-gt-steps 48 \
-    --eval-every "$TEST_EVERY" \
-    --eval-batch-size "$EVAL_BATCH" \
-    --eval-batches "$EVAL_BATCHES" \
-    --num-threads 4 \
-    --device cuda \
-    --seed "$SEED" \
-    $AMP $COMPILE \
-    $(if [ "$WANDB" = "1" ]; then echo "--wandb --wandb-project $WANDB_PROJECT --wandb-group $WANDB_GROUP --wandb-run-name ${M}_${WORLD}_seed${SEED} --wandb-mode $WANDB_MODE"; fi) \
-    $(if [ "$WANDB_ARTIFACTS" = "1" ]; then echo "--wandb-log-artifacts"; fi) \
-    --outdir "$OUT/$M" > "$OUT/$M.log" 2>&1 &
-  PIDS+=("$!")
-  PID_MODELS+=("$M")
-  if (( ${#PIDS[@]} == MAX_PARALLEL_JOBS )); then
-    wait_for_active_jobs
-  fi
+for S in "${SEED_VALUES[@]}"; do
+  mkdir -p "$(seed_out "$S")"
 done
-if (( ${#PIDS[@]} > 0 )); then
-  wait_for_active_jobs
-fi
 
-for M in "${MODELS[@]}"; do
-  if [ ! -f "$OUT/$M/checkpoint.pt" ]; then
-    echo "=== Skipping eval for $M: missing $OUT/$M/checkpoint.pt ==="
-    continue
-  fi
-  STATUS=0
-  CUDA_VISIBLE_DEVICES=${GPU_IDS[0]} python -m holoflow_conn.eval_connection \
-    --checkpoint "$OUT/$M/checkpoint.pt" \
-    --batch-size 16384 \
-    --batches 4 \
-    --gt-steps 64 \
-    --scaling \
-    --device cuda || STATUS=$?
-  if (( STATUS != 0 )); then
-    echo "=== Eval failed for $M with exit status $STATUS ==="
-    EVAL_FAILURES+=("$M:$STATUS")
+TRAIN_FAILURES_FILE="$PWD/.run_synthetic_train_failures_$$"
+: > "$TRAIN_FAILURES_FILE"
+export WORLD STEPS BATCH HIDDEN DEPTH TEST_EVERY EVAL_BATCH EVAL_BATCHES
+export WANDB WANDB_PROJECT WANDB_GROUP WANDB_MODE WANDB_ARTIFACTS
+export AMP COMPILE SEEDS OUT OUT_ROOT NUM_GPUS MAX_PARALLEL_JOBS TRAIN_FAILURES_FILE
+export GPU_IDS_STR="${GPU_IDS[*]}"
+
+python - <<'PY'
+from __future__ import annotations
+
+import os
+import shlex
+import subprocess
+import time
+from pathlib import Path
+
+
+world = os.environ["WORLD"]
+seeds = os.environ["SEEDS"].replace(",", " ").split()
+models = ["holonomy_connection", "independent_cfm", "shared_cfm", "flat_pifm", "local_connection"]
+gpu_ids = os.environ["GPU_IDS_STR"].split()
+max_jobs = int(os.environ["MAX_PARALLEL_JOBS"])
+failures_file = Path(os.environ["TRAIN_FAILURES_FILE"])
+
+
+def seed_out(seed: str) -> Path:
+    out_root = os.environ.get("OUT_ROOT", "")
+    if out_root:
+        return Path(f"{out_root}_seed{seed}")
+    if len(seeds) == 1:
+        return Path(os.environ["OUT"])
+    return Path(f"runs/synthetic_{world}_seed{seed}")
+
+
+def command(model: str, seed: str, out: Path) -> list[str]:
+    cmd = [
+        "python", "-m", "holoflow_conn.train_connection",
+        "--model", model,
+        "--world", world,
+        "--steps", os.environ["STEPS"],
+        "--batch-size", os.environ["BATCH"],
+        "--flat-batch-size", "512",
+        "--hidden", os.environ["HIDDEN"],
+        "--depth", os.environ["DEPTH"],
+        "--model-steps", "8",
+        "--gt-steps", "32",
+        "--eval-gt-steps", "48",
+        "--eval-every", os.environ["TEST_EVERY"],
+        "--eval-batch-size", os.environ["EVAL_BATCH"],
+        "--eval-batches", os.environ["EVAL_BATCHES"],
+        "--num-threads", "4",
+        "--device", "cuda",
+        "--seed", seed,
+    ]
+    cmd += shlex.split(os.environ.get("AMP", ""))
+    cmd += shlex.split(os.environ.get("COMPILE", ""))
+    if os.environ.get("WANDB") == "1":
+        group = out.name if len(seeds) > 1 else os.environ.get("WANDB_GROUP", out.name)
+        cmd += [
+            "--wandb",
+            "--wandb-project", os.environ["WANDB_PROJECT"],
+            "--wandb-group", group,
+            "--wandb-run-name", f"{model}_{world}_seed{seed}",
+            "--wandb-mode", os.environ["WANDB_MODE"],
+        ]
+    if os.environ.get("WANDB_ARTIFACTS") == "1":
+        cmd.append("--wandb-log-artifacts")
+    cmd += ["--outdir", str(out / model)]
+    return cmd
+
+
+pending = [(seed, model) for model in models for seed in seeds]
+free_gpus = gpu_ids[:max_jobs]
+active: list[tuple[subprocess.Popen, str, str, str, Path]] = []
+
+while pending or active:
+    while pending and free_gpus and len(active) < max_jobs:
+        seed, model = pending.pop(0)
+        gpu = free_gpus.pop(0)
+        out = seed_out(seed)
+        out.mkdir(parents=True, exist_ok=True)
+        log_path = out / f"{model}.log"
+        env = {**os.environ, "CUDA_VISIBLE_DEVICES": gpu}
+        print(
+            f"=== Launching {model} seed{seed} on CUDA_VISIBLE_DEVICES={gpu} "
+            f"({len(gpu_ids)} GPUs, max {max_jobs} jobs) ===",
+            flush=True,
+        )
+        log = log_path.open("w")
+        proc = subprocess.Popen(command(model, seed, out), stdout=log, stderr=subprocess.STDOUT, env=env)
+        log.close()
+        active.append((proc, gpu, seed, model, log_path))
+
+    for idx, (proc, gpu, seed, model, log_path) in enumerate(active):
+        status = proc.poll()
+        if status is None:
+            continue
+        active.pop(idx)
+        free_gpus.append(gpu)
+        if status != 0:
+            print(f"=== {model} seed{seed} failed with exit status {status}; see {log_path} ===", flush=True)
+            with failures_file.open("a") as f:
+                f.write(f"{model}_seed{seed}:{status}\n")
+        break
+    else:
+        time.sleep(2)
+PY
+
+for S in "${SEED_VALUES[@]}"; do
+  SEED_OUT=$(seed_out "$S")
+  COMPLETED_RUNS=()
+  for M in "${MODELS[@]}"; do
+    if [ ! -f "$SEED_OUT/$M/checkpoint.pt" ]; then
+      echo "=== Skipping eval for $M seed$S: missing $SEED_OUT/$M/checkpoint.pt ==="
+      continue
+    fi
+    STATUS=0
+    CUDA_VISIBLE_DEVICES=${GPU_IDS[0]} python -m holoflow_conn.eval_connection \
+      --checkpoint "$SEED_OUT/$M/checkpoint.pt" \
+      --batch-size 16384 \
+      --batches 4 \
+      --gt-steps 64 \
+      --scaling \
+      --device cuda || STATUS=$?
+    if (( STATUS != 0 )); then
+      echo "=== Eval failed for $M seed$S with exit status $STATUS ==="
+      EVAL_FAILURES+=("${M}_seed${S}:$STATUS")
+    else
+      COMPLETED_RUNS+=("$SEED_OUT/$M")
+    fi
+  done
+
+  if (( ${#COMPLETED_RUNS[@]} > 0 )); then
+    python -m holoflow_conn.compare_runs --runs "${COMPLETED_RUNS[@]}" --out "$SEED_OUT/comparison.csv"
+    echo "Wrote $SEED_OUT/comparison.csv"
   else
-    COMPLETED_RUNS+=("$OUT/$M")
+    echo "=== No completed runs to compare for seed$S ==="
   fi
 done
 
-if (( ${#COMPLETED_RUNS[@]} > 0 )); then
-  python -m holoflow_conn.compare_runs --runs "${COMPLETED_RUNS[@]}" --out "$OUT/comparison.csv"
-  echo "Wrote $OUT/comparison.csv"
-else
-  echo "=== No completed runs to compare ==="
-fi
-
-if (( ${#TRAIN_FAILURES[@]} > 0 || ${#EVAL_FAILURES[@]} > 0 )); then
+if [ -s "$TRAIN_FAILURES_FILE" ] || (( ${#EVAL_FAILURES[@]} > 0 )); then
+  TRAIN_FAILURES=$(tr '\n' ' ' < "$TRAIN_FAILURES_FILE")
   {
-    printf "Training failures: %s\n" "${TRAIN_FAILURES[*]:-none}"
+    printf "Training failures: %s\n" "${TRAIN_FAILURES:-none}"
     printf "Eval failures: %s\n" "${EVAL_FAILURES[*]:-none}"
-  } > "$OUT/failures.txt"
-  echo "=== Some jobs failed; wrote $OUT/failures.txt ==="
+  } > "$(seed_out "${SEED_VALUES[0]}")/failures.txt"
+  echo "=== Some jobs failed; wrote $(seed_out "${SEED_VALUES[0]}")/failures.txt ==="
   if [ "$FAIL_ON_ERROR" = "1" ]; then
+    rm -f "$TRAIN_FAILURES_FILE"
     exit 1
   fi
 fi
+rm -f "$TRAIN_FAILURES_FILE"

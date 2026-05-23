@@ -61,7 +61,7 @@ MODAL_PROFILE=hao-ai-lab modal secret create wandb-adamlee00 WANDB_API_KEY=...
 ```
 
 Do not also run the bash script for this experiment. Modal runs that script
-inside the remote container once per seed.
+inside the remote container and schedules all requested seeds.
 
 ---
 
@@ -397,14 +397,13 @@ Volume.
 ### Local CUDA Only
 
 Do not run this if you are using Modal. This is the lower-level local/cluster
-script that Modal calls once per seed. It runs the same five synthetic models
-for one seed on the GPUs visible on the current machine.
+script that Modal calls. It keeps visible GPUs busy with a simple job queue.
 
 ```bash
 NUM_GPUS=4 STEPS=10000 BATCH=4096 HIDDEN=256 DEPTH=5 bash scripts/run_synthetic.sh
 ```
 
-Local multi-seed version of the same CUDA script:
+Local multi-seed wrapper:
 
 ```bash
 SEEDS="0 1 2" STEPS=10000 BATCH=4096 bash scripts/run_multiseed_synthetic.sh
