@@ -1,0 +1,21 @@
+name: holonomy-connection-flowmaps
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - numpy
+  - pandas
+  - matplotlib
+  - tqdm
+  - pytest
+  - wandb
+  - pytorch
+  - torchvision
+  - pytorch-cuda=12.1
+  - pip:
+      - -e .
+      - wandb>=0.16
