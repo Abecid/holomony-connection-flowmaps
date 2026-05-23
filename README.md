@@ -4,16 +4,16 @@ Controlled-connection flow maps for **order-sensitive / noncommuting generative 
 
 This repo implements the full method we actually want to test, not just endpoint regression with a curvature-sounding name. The learned object is a pair of controlled vector fields
 
-\[
+$$
 \frac{dx}{d\alpha}=V_A^\theta(x,\alpha,\beta),\qquad
 \frac{dx}{d\beta}=V_B^\theta(x,\alpha,\beta),
-\]
+$$
 
 whose finite-time rollouts can have nonzero loop holonomy:
 
-\[
+$$
 H_{AB}(x)=F_B^{-\Delta}F_A^{-\Delta}F_B^\Delta F_A^\Delta(x)-x.
-\]
+$$
 
 The core hypothesis is:
 
@@ -366,9 +366,9 @@ flatness_norm2
 
 This estimates the squared curvature norm
 
-\[
+$$
 \|\partial_\alpha V_B-\partial_\beta V_A + [V_A,V_B]\|^2.
-\]
+$$
 
 `flat_pifm` should reduce this. On the nonlinear world, reducing this too much should hurt holonomy.
 
